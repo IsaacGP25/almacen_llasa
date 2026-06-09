@@ -342,7 +342,7 @@
         <thead>
           <tr>
             <th>#</th><th>Código</th><th>Medida / Nombre</th><th>Marca</th>
-            <th>Piezas</th><th>Monto s/IVA</th><th>% acum.</th><th>Clase</th>
+            <th>Piezas</th><th>% acum.</th><th>Clase</th>
           </tr>
         </thead>
         <tbody id="abc-tbody"></tbody>
@@ -363,6 +363,7 @@
   <div class="modal">
     <div class="modal-title" id="modalAsignarTitle">Asignar ubicación</div>
     <input type="hidden" id="a-codigo">
+    <input type="hidden" id="a-ubic-idx">
     <div id="a-info" style="margin-bottom:1.25rem; padding:12px 16px; background:#f8f9fb; border-radius:10px;"></div>
     <div class="form-grid">
       <div class="form-group"><label>Bodega</label><input type="text" id="a-bodega" placeholder="ej. B" maxlength="4" oninput="updateUbiPreview()"></div>
@@ -376,6 +377,7 @@
     <div class="modal-actions">
       <button class="btn btn-danger" id="btnQuitarUbic" onclick="quitarUbicacion()" style="margin-right:auto; display:none;">Quitar ubicación</button>
       <button class="btn btn-ghost" onclick="closeAsignar()">Cancelar</button>
+      <button class="btn btn-ghost" onclick="agregarOtraUbicacion()">+ Otra ubicación</button>
       <button class="btn btn-primary" onclick="guardarUbicacion()">Guardar</button>
     </div>
   </div>
@@ -435,7 +437,7 @@ async function cargarERP(){
 
 // ── DASHBOARD ──
 function renderDashboard(){
-  const totalERP=erp.length, ubicadas=Object.keys(ubic).length;
+  const totalERP=erp.length, ubicadas=erp.filter(r=>tieneUbicacion(r.Codigo)).length;
   const totalExist=erp.reduce((s,r)=>s+existErp(r),0);
   const totalFisico=Object.values(ubic).reduce((s,u)=>s+(Number(u.cantidad)||0),0);
   const disc=erp.filter(hayDiscrepancia).length;
@@ -487,21 +489,39 @@ function buscar(){
   res=res.slice(0,60);
   if(!res.length){ cont.innerHTML='<div class="empty-state"><p>Sin resultados.</p></div>'; return; }
   cont.innerHTML='<div style="font-size:13px;color:var(--muted);margin-bottom:1rem;">'+totalRes+' resultado(s)'+(totalRes>60?' · mostrando 60':'')+'</div>'+res.map(r=>{
-    const cod=r.Codigo, u=ubic[cod], disc=hayDiscrepancia(r);
-    return '<div class="card" style="margin-bottom:.85rem;"><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><span class="mono" style="font-size:15px;font-weight:600;color:var(--navy);">'+medidaDe(r)+'</span><span class="badge badge-navy">'+(r.Marca||'—')+'</span><span class="mono" style="font-size:11px;color:var(--muted);">#'+cod+'</span></div>'+(u?'<span class="ubicacion-tag">'+u.ubicacion+'</span>':'<span class="ubicacion-tag sin">sin ubicar</span>')+'</div><div style="margin-top:8px;font-size:13px;">'+(r.Descripcion||'')+'</div><div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);align-items:center;"><span>'+(r.Segmento||'—')+'</span><span>ERP: <strong style="color:var(--text);">'+existErp(r)+'</strong></span>'+(u?'<span>Física: <strong style="color:var(--text);">'+u.cantidad+'</strong></span>':'')+(disc?'<span class="disc">⚠ discrepancia</span>':'')+'</div><div style="margin-top:10px;"><button class="btn '+(u?'btn-ghost':'btn-primary')+' btn-sm" onclick="abrirAsignar(\''+cod+'\')">'+(u?'↔ Editar ubicación':'+ Asignar ubicación')+'</button></div></div>';
+    const cod=r.Codigo, locs=ubic[cod]||[], disc=hayDiscrepancia(r);
+    const totalFis = cantFisica(cod);
+    return '<div class="card" style="margin-bottom:.85rem;"><div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><span class="mono" style="font-size:15px;font-weight:600;color:var(--navy);">'+medidaDe(r)+'</span><span class="badge badge-navy">'+(r.Marca||'—')+'</span><span class="mono" style="font-size:11px;color:var(--muted);">#'+cod+'</span></div><div style="display:flex;flex-wrap:wrap;gap:4px;">'+ubicacionesTag(cod)+'</div></div><div style="margin-top:8px;font-size:13px;">'+(r.Descripcion||'')+'</div><div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);align-items:center;"><span>'+(r.Segmento||'—')+'</span><span>ERP: <strong style="color:var(--text);">'+existErp(r)+'</strong></span>'+(locs.length?'<span>Física: <strong style="color:var(--text);">'+(totalFis??0)+'</strong></span>':'')+(disc?'<span class="disc">⚠ discrepancia</span>':'')+'</div><div style="margin-top:10px;"><button class="btn '+(locs.length?'btn-ghost':'btn-primary')+' btn-sm" onclick="abrirAsignar(\''+cod+'\')">'+(locs.length?'+ Nueva ubicación':'+ Asignar ubicación')+'</button></div></div>';
   }).join('');
 }
-function abrirAsignar(cod){
+// ubic ahora es { codigo: [ {bodega,pasillo,rack,nivel,ubicacion,cantidad,notas,updatedAt}, ... ] }
+// Helper: total físico de un código
+function cantFisica(cod){ const locs=ubic[cod]; return locs&&locs.length ? locs.reduce((s,u)=>s+(Number(u.cantidad)||0),0) : null; }
+function hayDiscrepancia(r){ const f=cantFisica(r.Codigo); return f!==null && f!==existErp(r); }
+function tieneUbicacion(cod){ return ubic[cod]&&ubic[cod].length>0; }
+function ubicacionesTag(cod){
+  const locs=ubic[cod];
+  if(!locs||!locs.length) return '<span class="ubicacion-tag sin">sin ubicar</span>';
+  return locs.map(u=>'<span class="ubicacion-tag" style="margin-right:4px;">'+u.ubicacion+'</span>').join('');
+}
+
+function abrirAsignar(cod, idx){
   const r=erp.find(x=>x.Codigo==cod); if(!r) return;
-  const u=ubic[cod];
+  const locs=ubic[cod]||[];
+  const u = idx!==undefined ? locs[idx] : null;
   document.getElementById('a-codigo').value=cod;
-  document.getElementById('modalAsignarTitle').textContent=u?'Editar ubicación':'Asignar ubicación';
-  document.getElementById('a-info').innerHTML='<div style="font-weight:600;font-size:15px;color:var(--navy);font-family:\'DM Mono\',monospace;">'+medidaDe(r)+'</div><div style="font-size:13px;margin-top:3px;">'+(r.Marca||'')+' · '+(r.Descripcion||'')+'</div><div style="font-size:12px;color:var(--muted);margin-top:3px;">#'+cod+' · Existencia ERP: '+existErp(r)+'</div>';
+  document.getElementById('a-ubic-idx').value = idx!==undefined ? idx : '';
+  document.getElementById('modalAsignarTitle').textContent = u ? 'Editar ubicación' : 'Nueva ubicación';
+  document.getElementById('a-info').innerHTML=
+    '<div style="font-weight:600;font-size:15px;color:var(--navy);font-family:\'DM Mono\',monospace;">'+medidaDe(r)+'</div>'+
+    '<div style="font-size:13px;margin-top:3px;">'+(r.Marca||'')+' · '+(r.Descripcion||'')+'</div>'+
+    '<div style="font-size:12px;color:var(--muted);margin-top:3px;">#'+cod+' · Existencia ERP: '+existErp(r)+'</div>'+
+    (locs.length>0?'<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">'+locs.map((l,i)=>'<span class="ubicacion-tag" style="cursor:pointer;" onclick="closeAsignar();abrirAsignar(\''+cod+'\','+i+')">'+l.ubicacion+' ('+l.cantidad+')</span>').join('')+'</div>':'');
   document.getElementById('a-bodega').value=u?.bodega||'';
   document.getElementById('a-pasillo').value=u?.pasillo||'';
   document.getElementById('a-rack').value=u?.rack||'';
   document.getElementById('a-nivel').value=u?.nivel||'';
-  document.getElementById('a-cantidad').value=u?.cantidad??existErp(r);
+  document.getElementById('a-cantidad').value=u?.cantidad??'';
   document.getElementById('a-notas').value=u?.notas||'';
   document.getElementById('btnQuitarUbic').style.display=u?'inline-flex':'none';
   updateUbiPreview();
@@ -514,13 +534,26 @@ function guardarUbicacion(){
   const cod=v('a-codigo'), bodega=v('a-bodega');
   if(!bodega) return toast('Escribe al menos la bodega','error');
   const ubicacion=buildUbicacion(bodega,v('a-pasillo'),v('a-rack'),v('a-nivel'));
-  ubic[cod]={bodega,pasillo:v('a-pasillo'),rack:v('a-rack'),nivel:v('a-nivel'),ubicacion,cantidad:parseInt(v('a-cantidad'))||0,notas:v('a-notas'),updatedAt:new Date().toISOString()};
+  const nuevaUbic={bodega,pasillo:v('a-pasillo'),rack:v('a-rack'),nivel:v('a-nivel'),ubicacion,cantidad:parseInt(v('a-cantidad'))||0,notas:v('a-notas'),updatedAt:new Date().toISOString()};
+  if(!ubic[cod]) ubic[cod]=[];
+  const idxStr=document.getElementById('a-ubic-idx').value;
+  if(idxStr!=='') ubic[cod][parseInt(idxStr)]=nuevaUbic;
+  else ubic[cod].push(nuevaUbic);
   saveUbic(); closeAsignar(); toast('Ubicación guardada: '+ubicacion,'success'); renderTodo(); pushUbic(cod,ubic[cod]);
 }
-function quitarUbicacion(){
+function agregarOtraUbicacion(){
+  guardarUbicacion();
+  // Después de guardar, reabrir en modo nueva ubicación para el mismo código
+  const cod = document.getElementById('a-codigo').value;
+  if(cod) setTimeout(()=>abrirAsignar(cod),100);
+}
   const cod=v('a-codigo');
-  if(!confirm('¿Quitar la ubicación de esta llanta?')) return;
-  delete ubic[cod]; saveUbic(); closeAsignar(); toast('Ubicación eliminada','error'); renderTodo(); pushUbic(cod,null);
+  const idxStr=document.getElementById('a-ubic-idx').value;
+  if(idxStr==='') return;
+  if(!confirm('¿Quitar esta ubicación?')) return;
+  ubic[cod].splice(parseInt(idxStr),1);
+  if(!ubic[cod].length) delete ubic[cod];
+  saveUbic(); closeAsignar(); toast('Ubicación eliminada','error'); renderTodo(); pushUbic(cod,ubic[cod]||null);
 }
 
 // ── TRASPASOS (CARRITO) ──
@@ -530,8 +563,8 @@ function buscarTraspaso(){
   const res=erp.filter(r=>(r.Codigo||'').toString().toLowerCase().includes(q)||medidaDe(r).toLowerCase().includes(q)||(r.Marca||'').toLowerCase().includes(q)||(r.Descripcion||'').toLowerCase().includes(q)).slice(0,30);
   if(!res.length){ cont.innerHTML='<div class="empty-state" style="padding:1.5rem;"><p>Sin resultados.</p></div>'; return; }
   cont.innerHTML=res.map(r=>{
-    const u=ubic[r.Codigo], enCarrito=cart.find(c=>c.codigo==r.Codigo);
-    return '<div class="card" style="margin-bottom:.7rem;"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="mono" style="font-size:14px;font-weight:600;color:var(--navy);">'+medidaDe(r)+'</span><span class="badge badge-navy">'+(r.Marca||'')+'</span>'+(u?'<span class="ubicacion-tag">'+u.ubicacion+'</span>':'')+'</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">#'+r.Codigo+' · Física: '+(cantFisica(r.Codigo)??'—')+'</div></div><button class="btn '+(enCarrito?'btn-ghost':'btn-primary')+' btn-sm" onclick="abrirCart(\''+r.Codigo+'\')">'+(enCarrito?'✓ En traspaso':'+ Agregar')+'</button></div></div>';
+    const locs=ubic[r.Codigo]||[], enCarrito=cart.find(c=>c.codigo==r.Codigo);
+    return '<div class="card" style="margin-bottom:.7rem;"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="mono" style="font-size:14px;font-weight:600;color:var(--navy);">'+medidaDe(r)+'</span><span class="badge badge-navy">'+(r.Marca||'')+'</span>'+(locs.length?locs.map(l=>'<span class="ubicacion-tag">'+l.ubicacion+'</span>').join(''):'')+'</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">#'+r.Codigo+' · Física: '+(cantFisica(r.Codigo)??'—')+'</div></div><button class="btn '+(enCarrito?'btn-ghost':'btn-primary')+' btn-sm" onclick="abrirCart(\''+r.Codigo+'\')">'+(enCarrito?'✓ En traspaso':'+ Agregar')+'</button></div></div>';
   }).join('');
 }
 function abrirCart(cod){
@@ -601,15 +634,15 @@ function renderTabla(){
   if(!rows.length){ tbody.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display='none'; rows=rows.slice(0,300);
   tbody.innerHTML=rows.map(r=>{
-    const u=ubic[r.Codigo], disc=hayDiscrepancia(r);
-    return '<tr><td><span class="mono">'+r.Codigo+'</span></td><td><span class="mono" style="font-weight:600;">'+medidaDe(r)+'</span></td><td><span class="badge badge-navy">'+(r.Marca||'—')+'</span></td><td style="font-size:12.5px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(r.Descripcion||'')+'</td><td style="font-size:12px;color:var(--muted);">'+(r.Segmento||'—')+'</td><td><span class="badge badge-gray">'+existErp(r)+'</span></td><td>'+(u?'<span class="ubicacion-tag">'+u.ubicacion+'</span>':'<span class="ubicacion-tag sin">—</span>')+'</td><td>'+(u?'<span class="badge '+(disc?'badge-amber':(u.cantidad>0?'badge-green':'badge-red'))+'">'+u.cantidad+(disc?' ⚠':'')+'</span>':'<span style="color:#cbd5e1;">—</span>')+'</td><td><button class="btn '+(u?'btn-ghost':'btn-primary')+' btn-sm" onclick="abrirAsignar(\''+r.Codigo+'\')">'+(u?'↔':'+')+'</button></td></tr>';
+    const locs=ubic[r.Codigo]||[], disc=hayDiscrepancia(r), totalFis=cantFisica(r.Codigo);
+    return '<tr><td><span class="mono">'+r.Codigo+'</span></td><td><span class="mono" style="font-weight:600;">'+medidaDe(r)+'</span></td><td><span class="badge badge-navy">'+(r.Marca||'—')+'</span></td><td style="font-size:12.5px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(r.Descripcion||'')+'</td><td style="font-size:12px;color:var(--muted);">'+(r.Segmento||'—')+'</td><td><span class="badge badge-gray">'+existErp(r)+'</span></td><td>'+(locs.length?locs.map(l=>'<span class="ubicacion-tag" style="margin-right:3px;font-size:11px;">'+l.ubicacion+'</span>').join(''):'<span class="ubicacion-tag sin">—</span>')+'</td><td>'+(locs.length?'<span class="badge '+(disc?'badge-amber':(totalFis>0?'badge-green':'badge-red'))+'">'+totalFis+(disc?' ⚠':'')+'</span>':'<span style="color:#cbd5e1;">—</span>')+'</td><td><button class="btn btn-primary btn-sm" onclick="abrirAsignar(\''+r.Codigo+'\')" title="'+(locs.length?'Agregar ubicación':'Asignar')+'">+</button></td></tr>';
   }).join('');
 }
 
 // ── PENDIENTES ──
 function renderPendientes(){
   const q=v('pendInput').trim().toLowerCase();
-  let pend=erp.filter(r=>!ubic[r.Codigo]);
+  let pend=erp.filter(r=>!tieneUbicacion(r.Codigo));
   document.getElementById('pendStats').innerHTML='<div class="stat-card accent"><div class="stat-label">Pendientes por ubicar</div><div class="stat-value">'+pend.length+'</div><div class="stat-sub">de '+erp.length+' productos</div></div>';
   document.getElementById('pendBadge').textContent=pend.length;
   document.getElementById('pendBadge').style.display=pend.length?'inline-block':'none';
@@ -659,7 +692,7 @@ function renderTodo(){
   if(document.getElementById('panel-inventario').classList.contains('active')){ renderInvChips(); renderTabla(); }
   if(document.getElementById('panel-pendientes').classList.contains('active')) renderPendientes();
   // siempre actualizar badge de pendientes
-  const pend=erp.filter(r=>!ubic[r.Codigo]).length;
+  const pend=erp.filter(r=>!tieneUbicacion(r.Codigo)).length;
   document.getElementById('pendBadge').textContent=pend;
   document.getElementById('pendBadge').style.display=pend?'inline-block':'none';
   updateCartBadge();
@@ -719,21 +752,21 @@ function mesesDelPeriodo(){
 
 function consolidarVentas(){
   const meses = mesesDelPeriodo();
-  const fSuc = (document.getElementById('abc-f-sucursal')?.value||'').trim().toLowerCase();
+  const fSuc   = (document.getElementById('abc-f-sucursal')?.value||'').trim().toLowerCase();
+  const fMarca = (document.getElementById('abc-f-marca')?.value||'').trim();
   const mapa = {};
   meses.forEach(m=>{
     const rows = ventasMes[m.toString()] || [];
     rows.forEach(r=>{
-      // Filtro de sucursal
       if(fSuc){
         const suc = (r['Sucursal']||'').toString().trim().toLowerCase();
         if(!suc.includes(fSuc) && !fSuc.includes(suc)) return;
       }
+      if(fMarca && (r.Marca||'').toString().trim() !== fMarca) return;
       const cod = (r.Codigo||'').toString().trim();
       if(!cod) return;
-      if(!mapa[cod]) mapa[cod]={ codigo:cod, nombre:r.Nombre||r.Descripcion||'', marca:r.Marca||'', piezas:0, monto:0 };
+      if(!mapa[cod]) mapa[cod]={ codigo:cod, nombre:r.Nombre||r.Descripcion||'', marca:r.Marca||'', piezas:0 };
       mapa[cod].piezas += Number(r['Total de Venta']||r.TotalVenta||0);
-      mapa[cod].monto  += Number(r['Monto Total sin IVA']||r.MontoSinIVA||0);
     });
   });
   return Object.values(mapa).filter(x=>x.piezas>0).sort((a,b)=>b.piezas-a.piezas);
@@ -761,10 +794,10 @@ function limpiarFiltrosABC(){
 }
 
 function renderABC(){
-  const rows = consolidarVentas(); // sucursal ya filtrada dentro
+  const rows = consolidarVentas(); // sucursal y marca ya filtradas dentro
   poblarMarcasABC(rows);
 
-  // Asignar clase a cada producto (posición en ranking global)
+  // Asignar clase sobre el universo filtrado
   rows.forEach((r,i)=>{ r.clase=claseABC(i); r.rank=i+1; });
 
   // Calcular % acumulado
@@ -772,12 +805,10 @@ function renderABC(){
   let acum=0;
   rows.forEach(r=>{ acum+=r.piezas; r.pctAcum = totalPiezas ? (acum/totalPiezas*100) : 0; });
 
-  // Filtros
+  // Solo filtro de clase y búsqueda libre (marca ya aplicada en consolidar)
   const q = (document.getElementById('abc-search').value||'').trim().toLowerCase();
-  const fMarca = document.getElementById('abc-f-marca').value;
   const fClase = document.getElementById('abc-f-clase').value;
   let filtered = rows;
-  if(fMarca) filtered=filtered.filter(r=>r.marca===fMarca);
   if(fClase) filtered=filtered.filter(r=>r.clase===fClase);
   if(q) filtered=filtered.filter(r=>r.codigo.toLowerCase().includes(q)||r.nombre.toLowerCase().includes(q)||r.marca.toLowerCase().includes(q));
 
@@ -808,7 +839,6 @@ function renderABC(){
       '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;">'+r.nombre+'</td>'+
       '<td><span class="badge badge-navy">'+r.marca+'</span></td>'+
       '<td><strong>'+r.piezas.toLocaleString()+'</strong></td>'+
-      '<td style="font-size:12.5px;color:var(--muted);">$'+r.monto.toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2})+'</td>'+
       '<td><div style="display:flex;align-items:center;gap:6px;"><div style="width:60px;height:6px;background:#e8edf7;border-radius:4px;overflow:hidden;"><div style="width:'+Math.min(r.pctAcum,100).toFixed(1)+'%;height:100%;background:var(--gold);border-radius:4px;"></div></div><span style="font-size:11px;color:var(--muted);">'+r.pctAcum.toFixed(1)+'%</span></div></td>'+
       '<td><span class="badge" style="'+classBadge[r.clase]+'font-size:13px;padding:4px 12px;">'+r.clase+'</span></td>'+
     '</tr>';
@@ -829,7 +859,7 @@ async function cargarVentas(){
 
 // ── INIT ──
 renderDashboard();
-const pend0=erp.filter(r=>!ubic[r.Codigo]).length;
+const pend0=erp.filter(r=>!tieneUbicacion(r.Codigo)).length;
 if(pend0){ document.getElementById('pendBadge').textContent=pend0; document.getElementById('pendBadge').style.display='inline-block'; }
 // Restaurar cortes ABC guardados
 document.getElementById('abc-corte-a').value = abcCorteA;
