@@ -543,10 +543,10 @@ function guardarUbicacion(){
 }
 function agregarOtraUbicacion(){
   guardarUbicacion();
-  // Después de guardar, reabrir en modo nueva ubicación para el mismo código
   const cod = document.getElementById('a-codigo').value;
   if(cod) setTimeout(()=>abrirAsignar(cod),100);
 }
+function quitarUbicacion(){
   const cod=v('a-codigo');
   const idxStr=document.getElementById('a-ubic-idx').value;
   if(idxStr==='') return;
