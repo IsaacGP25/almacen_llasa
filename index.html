@@ -418,8 +418,6 @@ function medidaDe(r){
   if(a&&al&&ri) return a+'/'+al+ri; if(a&&ri) return a+ri; return a||ri||'—';
 }
 function existErp(r){ return Number(r.Existencia)||0; }
-function cantFisica(cod){ return ubic[cod] ? (Number(ubic[cod].cantidad)||0) : null; }
-function hayDiscrepancia(r){ const f=cantFisica(r.Codigo); return f!==null && f!==existErp(r); }
 
 async function cargarERP(){
   updateSync('syncing');
