@@ -650,28 +650,31 @@
 const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbx2wcONRkOFit5tGujH3BhRMNmSpOeyjOWx9rPDzDVilnMqGO0zBDNg1K1LcrYC_OK6/exec';
 
 // ══════════════════════════════════════════════════════════════
-//  VIDEOS DE FONDO  ── pega aquí las URLs de tus videos (.mp4/.webm)
-//  Déjalas vacías ('') para usar solo el degradado. Sugerencia: sube
-//  clips cortos y livianos (Mixkit / Coverr / Pexels) a tu repo de GitHub
-//  y usa la URL "raw" o de GitHub Pages.
+//  VIDEOS DE FONDO
+//  Ya viene un video GENÉRICO real (Pexels, libre, sin atribución):
+//  vista aérea B&N de un parque logístico/almacenes, 1440p horizontal.
+//  Cambia cualquier pestaña por su propio video cuando quieras
+//  (sube tus clips a tu repo de GitHub y pega la URL aquí).
+//  Deja una cadena vacía ('') para usar solo el degradado en esa pestaña.
 // ══════════════════════════════════════════════════════════════
+const VIDEO_GENERICO = 'https://videos.pexels.com/video-files/31635295/13477866_2560_1440_30fps.mp4';
 const VIDEOS = {
-  login:      '',   // ej. almacén / llantas en estante
-  dashboard:  '',   // ej. data / luces / centro logístico
-  asignar:    '',   // ej. estantería / racks
-  traspasos:  '',   // ej. montacargas / camión cargando
-  inventario: '',   // ej. pasillos de bodega
-  pendientes: '',   // ej. cajas / pallets
-  abc:        ''    // ej. gráficas / pantallas de datos
+  login:      VIDEO_GENERICO,
+  dashboard:  VIDEO_GENERICO,
+  asignar:    VIDEO_GENERICO,
+  traspasos:  VIDEO_GENERICO,
+  inventario: VIDEO_GENERICO,
+  pendientes: VIDEO_GENERICO,
+  abc:        VIDEO_GENERICO
 };
 function setBg(key){
   const vid = document.getElementById('bgVideo');
-  const url = VIDEOS[key];
+  const url = VIDEOS[key] || '';
   if(url){
-    if(vid.getAttribute('data-key') !== key){ vid.setAttribute('data-key', key); vid.src = url; vid.play && vid.play().catch(()=>{}); }
+    if(vid.getAttribute('data-src') !== url){ vid.setAttribute('data-src', url); vid.src = url; vid.play && vid.play().catch(()=>{}); }
     vid.style.opacity = '1';
   } else {
-    vid.removeAttribute('src'); vid.removeAttribute('data-key'); try{ vid.load(); }catch(e){}
+    vid.removeAttribute('src'); vid.removeAttribute('data-src'); try{ vid.load(); }catch(e){}
     vid.style.opacity = '0';
   }
 }
