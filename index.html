@@ -580,13 +580,18 @@ function confirmarAgregarCarrito(){
   const r=erp.find(x=>x.Codigo==cod);
   const existing=cart.find(c=>c.codigo==cod);
   if(existing) existing.cantidad+=cant;
-  else cart.push({codigo:cod, medida:medidaDe(r), marca:r.Marca, cantidad:cant, ubicacion:(ubic[cod]?ubic[cod].ubicacion:'')});
+  else cart.push({codigo:cod, medida:medidaDe(r), marca:r.Marca, cantidad:cant, ubicaciones:(ubic[cod]||[]).map(l=>l.ubicacion).filter(Boolean)});
   closeCart(); toast('Agregado al traspaso','success'); renderCart(); buscarTraspaso();
 }
 function renderCart(){
   const cont=document.getElementById('cartItems'), footer=document.getElementById('cartFooter');
   if(!cart.length){ cont.innerHTML='<div class="empty-state" style="padding:1.5rem 1rem;"><p>Agrega llantas al traspaso desde la búsqueda.</p></div>'; footer.style.display='none'; updateCartBadge(); return; }
-  cont.innerHTML=cart.map((c,i)=>'<div class="cart-item"><div style="min-width:0;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="mono" style="font-weight:600;font-size:13px;">'+c.medida+'</span>'+(c.ubicacion?'<span class="ubicacion-tag">'+c.ubicacion+'</span>':'<span class="ubicacion-tag sin">sin ubicar</span>')+'</div><div style="font-size:11px;color:var(--muted);margin-top:3px;">'+c.marca+' · #'+c.codigo+'</div></div><div style="display:flex;align-items:center;gap:8px;"><span class="badge badge-amber">'+c.cantidad+' pz</span><button class="btn btn-danger btn-sm" onclick="quitarCart('+i+')">✕</button></div></div>').join('');
+  cont.innerHTML=cart.map((c,i)=>{
+    const ubicTags = (c.ubicaciones||[]).length
+      ? c.ubicaciones.map(u=>'<span class="ubicacion-tag" style="margin-right:3px;">'+u+'</span>').join('')
+      : '<span class="ubicacion-tag sin">sin ubicar</span>';
+    return '<div class="cart-item"><div style="min-width:0;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="mono" style="font-weight:600;font-size:13px;">'+c.medida+'</span>'+ubicTags+'</div><div style="font-size:11px;color:var(--muted);margin-top:3px;">'+c.marca+' · #'+c.codigo+'</div></div><div style="display:flex;align-items:center;gap:8px;"><span class="badge badge-amber">'+c.cantidad+' pz</span><button class="btn btn-danger btn-sm" onclick="quitarCart('+i+')">✕</button></div></div>';
+  }).join('');
   document.getElementById('cartTotal').textContent=cart.reduce((s,c)=>s+c.cantidad,0);
   footer.style.display='block'; updateCartBadge();
 }
@@ -598,9 +603,24 @@ function registrarTraspaso(){
   if(!confirm('¿Registrar el traspaso? Se descontará la cantidad de la existencia física.')) return;
   const fecha=new Date().toISOString();
   cart.forEach(c=>{
-    if(ubic[c.codigo]){
-      ubic[c.codigo].cantidad=Math.max(0,(Number(ubic[c.codigo].cantidad)||0)-c.cantidad);
-      ubic[c.codigo].updatedAt=fecha;
+    if(ubic[c.codigo] && ubic[c.codigo].length){
+      // Descontar de la primera ubicación que tenga cantidad suficiente;
+      // si ninguna alcanza, descontar de la primera.
+      let restante = c.cantidad;
+      const locs = ubic[c.codigo];
+      for(let i=0; i<locs.length && restante>0; i++){
+        const disponible = Number(locs[i].cantidad)||0;
+        const descuento = Math.min(disponible, restante);
+        locs[i].cantidad = disponible - descuento;
+        locs[i].updatedAt = fecha;
+        restante -= descuento;
+      }
+      // Si todavía queda restante (suma física < cantidad traspasada),
+      // lo absorbemos en la primera ubicación (puede quedar en negativo visible)
+      if(restante > 0){
+        locs[0].cantidad = Math.max(0, (Number(locs[0].cantidad)||0) - restante);
+        locs[0].updatedAt = fecha;
+      }
       pushUbic(c.codigo, ubic[c.codigo]);
     }
   });
@@ -653,7 +673,15 @@ function renderPendientes(){
 // ── EXPORT ──
 function exportarCSV(){
   const headers=['Codigo','Medida','Marca','Descripcion','Segmento','Existencia','Ubicacion','Cantidad_Fisica','Discrepancia','Notas'];
-  const rows=erp.map(r=>{ const u=ubic[r.Codigo]||{}; const disc=hayDiscrepancia(r)?'SI':''; return [r.Codigo,medidaDe(r),r.Marca,r.Descripcion,r.Segmento,existErp(r),u.ubicacion||'',u.cantidad??'',disc,u.notas||''].map(c=>'"'+(c??'').toString().replace(/"/g,'""')+'"').join(','); });
+  const rows=erp.map(r=>{
+    const locs=ubic[r.Codigo]||[];
+    const disc=hayDiscrepancia(r)?'SI':'';
+    const ubicStr=locs.map(l=>l.ubicacion).filter(Boolean).join(' | ');
+    const cantTotal=locs.reduce((s,l)=>s+(Number(l.cantidad)||0),0);
+    const notasStr=locs.map(l=>l.notas).filter(Boolean).join(' | ');
+    return [r.Codigo,medidaDe(r),r.Marca,r.Descripcion,r.Segmento,existErp(r),ubicStr,locs.length?cantTotal:'',disc,notasStr]
+      .map(c=>'"'+(c??'').toString().replace(/"/g,'""')+'"').join(',');
+  });
   const blob=new Blob(['\ufeff'+[headers.join(','),...rows].join('\n')],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='llasa_almacen_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
   toast('CSV exportado','success');
@@ -748,16 +776,18 @@ function mesesDelPeriodo(){
   return [1,2,3,4,5,6,7,8,9,10,11,12];
 }
 
+function normStr(s){ return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+
 function consolidarVentas(){
   const meses = mesesDelPeriodo();
-  const fSuc   = (document.getElementById('abc-f-sucursal')?.value||'').trim().toLowerCase();
+  const fSuc   = normStr(document.getElementById('abc-f-sucursal')?.value||'');
   const fMarca = (document.getElementById('abc-f-marca')?.value||'').trim();
   const mapa = {};
   meses.forEach(m=>{
     const rows = ventasMes[m.toString()] || [];
     rows.forEach(r=>{
       if(fSuc){
-        const suc = (r['Sucursal']||'').toString().trim().toLowerCase();
+        const suc = normStr(r['Sucursal']||'');
         if(!suc.includes(fSuc) && !fSuc.includes(suc)) return;
       }
       if(fMarca && (r.Marca||'').toString().trim() !== fMarca) return;
