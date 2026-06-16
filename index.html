@@ -321,7 +321,7 @@
   </div>
   <div class="header-actions">
     <div class="sync-status"><span class="dot" id="syncDot"></span><span id="syncText">Cargando…</span></div>
-    <button class="header-btn gold" onclick="cargarERP()">↻ Actualizar ERP</button>
+    <button class="header-btn gold" id="btnUpdateERP" onclick="cargarERP()">↻ Actualizar ERP</button>
     <div class="user-chip"><span class="avatar" id="userAvatar">·</span><span id="userName">Usuario</span><span class="logout" title="Cerrar sesión" onclick="logout()">⏻</span></div>
   </div>
 </header>
@@ -332,6 +332,7 @@
   <div class="tab" onclick="showTab('inventario')" id="tab-inventario"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Inventario</div>
   <div class="tab" onclick="showTab('pendientes')" id="tab-pendientes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>Pendientes <span class="tab-badge" id="pendBadge" style="display:none;">0</span></div>
   <div class="tab" onclick="showTab('abc')" id="tab-abc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 16 4-8 4 8"/><path d="M9.5 12h5"/></svg>Análisis ABC</div>
+  <div class="tab" onclick="showTab('traspasoserp')" id="tab-traspasoserp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M8 14h2M14 14h2M8 17h2M14 17h2"/></svg>Traspasos ERP</div>
 </div>
 <main>
 
@@ -602,6 +603,22 @@
 
 </div>
 
+<!-- TRASPASOS ERP (pipeline) -->
+<div class="panel" id="panel-traspasoserp">
+  <div class="panel-hero">
+    <div class="eyebrow" id="te-eyebrow">Pipeline ERP</div>
+    <h2 id="te-title">Traspasos ERP</h2>
+    <p id="te-sub">Traspasos del ERP con tiempo de surtido y la ubicación física de cada llanta.</p>
+  </div>
+  <div class="search-bar">
+    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" id="te-search" placeholder="Buscar folio, destino, responsable, chofer o medida…" oninput="renderTraspasosERP()">
+    <button class="btn btn-ghost btn-sm" onclick="cargarTraspasosERP()">↻ Recargar</button>
+  </div>
+  <div class="stats-grid" id="te-stats"></div>
+  <div id="te-list"><div class="empty-state"><p>Cargando traspasos…</p></div></div>
+</div>
+
 </main>
 
 <!-- MODAL ASIGNAR -->
@@ -665,7 +682,8 @@ const VIDEOS = {
   traspasos:  VIDEO_GENERICO,
   inventario: VIDEO_GENERICO,
   pendientes: VIDEO_GENERICO,
-  abc:        VIDEO_GENERICO
+  abc:        VIDEO_GENERICO,
+  traspasoserp: VIDEO_GENERICO
 };
 function setBg(key){
   const vid = document.getElementById('bgVideo');
@@ -719,6 +737,7 @@ function enterApp(auth){
   document.getElementById('userName').textContent = nombre;
   document.getElementById('userAvatar').textContent = (nombre.trim()[0] || 'U').toUpperCase();
   setBg('dashboard');
+  applyRole(auth && auth.rol);
   if(!appBooted){ appBooted = true; bootApp(); }
 }
 
@@ -1033,6 +1052,7 @@ function showTab(name){
   if(name==='inventario'){ renderInvChips(); renderTabla(); }
   if(name==='pendientes'){ renderPendientes(); }
   if(name==='abc'){ renderABC(); }
+  if(name==='traspasoserp'){ cargarTraspasosERP(); }
 }
 function renderTodo(){
   renderDashboard();
@@ -1294,8 +1314,153 @@ function bootApp(){
   if(pend0){ document.getElementById('pendBadge').textContent = pend0; document.getElementById('pendBadge').style.display='inline-block'; }
   document.getElementById('abc-corte-a').value = abcCorteA;
   document.getElementById('abc-corte-b').value = abcCorteB;
-  cargarERP();
+  cargarERP().then(()=>{
+    if(document.getElementById('panel-traspasoserp').classList.contains('active')) renderTraspasosERP();
+  }).catch(()=>{});
   cargarVentas();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  TRASPASOS ERP (pipeline) · roles · timer · ubicación
+// ══════════════════════════════════════════════════════════════
+let traspasosERP = [];
+let teAdmin = false;
+
+// Muestra/oculta secciones según el rol. admin = todo; otro = solo traspasos.
+function applyRole(rol){
+  const admin = (rol||'').toString().trim().toLowerCase() === 'admin';
+  teAdmin = admin;
+  const soloAdmin = ['dashboard','asignar','traspasos','inventario','pendientes','abc'];
+  soloAdmin.forEach(n=>{ const t=document.getElementById('tab-'+n); if(t) t.style.display = admin ? '' : 'none'; });
+  const teTab = document.getElementById('tab-traspasoserp'); if(teTab) teTab.style.display = '';
+  const up = document.getElementById('btnUpdateERP'); if(up) up.style.display = admin ? '' : 'none';
+  document.getElementById('te-title').textContent   = admin ? 'Traspasos ERP' : 'Mis traspasos';
+  document.getElementById('te-eyebrow').textContent = admin ? 'Pipeline ERP · todos' : 'Pipeline ERP · asignados a ti';
+  document.getElementById('te-sub').textContent = admin
+    ? 'Todos los traspasos del ERP, con tiempo de surtido y la ubicación física de cada llanta.'
+    : 'Tus traspasos asignados, con botón de inicio/fin y la ubicación física de cada llanta.';
+  if(!admin) showTab('traspasoserp');
+}
+
+async function cargarTraspasosERP(){
+  let auth = {};
+  try{ auth = JSON.parse(sessionStorage.getItem('llasa_auth')||'{}'); }catch(e){}
+  const cont = document.getElementById('te-list');
+  try{
+    const res = await fetch(SHEETS_URL+'?action=loadTraspasos&usuario='+encodeURIComponent(auth.usuario||''));
+    const j = await res.json();
+    traspasosERP = j.traspasos || [];
+    if(typeof j.admin !== 'undefined') teAdmin = !!j.admin;
+    renderTraspasosERP();
+  }catch(e){
+    cont.innerHTML = '<div class="empty-state"><p>No se pudieron cargar los traspasos. Revisa el despliegue del Web App.</p></div>';
+  }
+}
+
+// Extrae tokens [codigo] del detalle y los cruza con ubic[codigo]
+function ubicacionesDeDetalle(detalle){
+  const out = []; const re = /\[([^\]]+)\]/g; let m;
+  while((m = re.exec(detalle)) !== null){
+    const cod = m[1].trim();
+    const locs = (ubic[cod]||[]).map(l=>l.ubicacion).filter(Boolean);
+    out.push({ cod, locs });
+  }
+  return out;
+}
+
+function teEstatusBadge(est){
+  const e = (est||'').toLowerCase();
+  let cls = 'badge-gray';
+  if(e.includes('confirm')) cls = 'badge-green';
+  else if(e.includes('activo')) cls = 'badge-amber';
+  else if(e.includes('cancel')) cls = 'badge-red';
+  return '<span class="badge '+cls+'">'+(est||'—')+'</span>';
+}
+
+function renderTraspasosERP(){
+  const cont = document.getElementById('te-list');
+  const q = (document.getElementById('te-search').value||'').trim().toLowerCase();
+  let rows = traspasosERP;
+  if(q) rows = rows.filter(t =>
+    (t.folio||'').toLowerCase().includes(q) || (t.destino||'').toLowerCase().includes(q) ||
+    (t.responsable||'').toLowerCase().includes(q) || (t.chofer||'').toLowerCase().includes(q) ||
+    (t.detalle||'').toLowerCase().includes(q) || (t.usuarioCaptura||'').toLowerCase().includes(q));
+
+  // Stats
+  const totalLlantas = rows.reduce((s,t)=>s+(parseInt(t.totalLlantas)||0),0);
+  const conTiempo = rows.filter(t=>t.tiempo!=='' && t.tiempo!=null).length;
+  const enCurso = rows.filter(t=>t.horaInicio && !t.horaFin).length;
+  document.getElementById('te-stats').innerHTML =
+    '<div class="stat-card accent"><div class="stat-label">Traspasos</div><div class="stat-value">'+rows.length+'</div><div class="stat-sub">'+(teAdmin?'todos':'asignados a ti')+'</div></div>'+
+    '<div class="stat-card"><div class="stat-label">Llantas totales</div><div class="stat-value">'+totalLlantas.toLocaleString()+'</div><div class="stat-sub">piezas en el período</div></div>'+
+    '<div class="stat-card"><div class="stat-label">En curso</div><div class="stat-value" style="color:var(--warning);">'+enCurso+'</div><div class="stat-sub">iniciados sin finalizar</div></div>'+
+    '<div class="stat-card"><div class="stat-label">Con tiempo medido</div><div class="stat-value">'+conTiempo+'</div><div class="stat-sub">surtidos cronometrados</div></div>';
+
+  if(!rows.length){
+    cont.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg><p>'+(traspasosERP.length?'Sin resultados con ese filtro.':'No hay traspasos para mostrar.')+'</p></div>';
+    return;
+  }
+
+  cont.innerHTML = rows.map(t=>{
+    // Ubicaciones por código (si el pipeline ya manda [codigo] en el detalle)
+    const items = ubicacionesDeDetalle(t.detalle);
+    let detalleHTML;
+    if(items.length){
+      detalleHTML = '<div style="display:flex;flex-direction:column;gap:7px;margin-top:10px;">'+items.map(it=>{
+        const locTags = it.locs.length
+          ? it.locs.map(u=>'<span class="ubicacion-tag" style="margin-left:4px;">'+u+'</span>').join('')
+          : '<span class="ubicacion-tag sin" style="margin-left:4px;">sin ubicar</span>';
+        return '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:12.5px;"><span class="mono" style="color:var(--muted);">#'+it.cod+'</span>'+locTags+'</div>';
+      }).join('')+'</div>';
+    } else {
+      detalleHTML = '<div style="margin-top:10px;font-size:12.5px;color:var(--text);">'+(t.detalle||'—')+'</div>'+
+        '<div style="margin-top:6px;font-size:11px;color:var(--muted);">Para ver la ubicación por llanta, activa los códigos en el pipeline (ver instrucciones).</div>';
+    }
+
+    // Timer
+    let timerHTML;
+    if(t.horaFin && t.tiempo!=='' && t.tiempo!=null){
+      timerHTML = '<span class="badge badge-green" style="font-size:12px;">✓ '+t.tiempo+' min</span><span style="font-size:11px;color:var(--muted);">'+(t.horaInicio||'')+' → '+(t.horaFin||'')+'</span>';
+    } else if(t.horaInicio && !t.horaFin){
+      timerHTML = '<span class="badge badge-amber" style="font-size:12px;">● En curso</span><span style="font-size:11px;color:var(--muted);">inició '+t.horaInicio+'</span><button class="btn btn-primary btn-sm" onclick="teFinish(\''+t.folio+'\')">■ Finalizar</button>';
+    } else {
+      timerHTML = '<button class="btn btn-ghost btn-sm" onclick="teStart(\''+t.folio+'\')">▶ Iniciar surtido</button>';
+    }
+
+    return '<div class="card" style="margin-bottom:1rem;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">'+
+        '<div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="mono" style="font-size:15px;font-weight:600;color:var(--ink-strong);">'+t.folio+'</span>'+teEstatusBadge(t.estatus)+'<span class="badge badge-navy">'+(t.tipo||'—')+'</span></div>'+
+        '<div style="font-size:12px;color:var(--muted);margin-top:5px;">'+(t.fecha||'')+' '+(t.hora||'')+' · → <strong style="color:var(--text);">'+(t.destino||'—')+'</strong></div></div>'+
+        '<div style="text-align:right;"><div style="font-size:20px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;color:var(--gold);">'+(t.totalLlantas||'0')+'</div><div style="font-size:11px;color:var(--muted);">'+(t.numModelos||'0')+' modelos</div></div>'+
+      '</div>'+
+      '<div style="margin-top:8px;font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap;">'+
+        (t.responsable?'<span>Responsable: <strong style="color:var(--text);">'+t.responsable+'</strong></span>':'')+
+        (t.chofer?'<span>Chofer: '+t.chofer+'</span>':'')+
+      '</div>'+
+      detalleHTML+
+      '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+timerHTML+'</div>'+
+    '</div>';
+  }).join('');
+}
+
+async function teStart(folio){
+  try{
+    const res = await fetch(SHEETS_URL,{method:'POST',mode:'cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'traspasoStart',folio})});
+    const j = await res.json();
+    if(j && j.ok){ const t=traspasosERP.find(x=>x.folio===folio); if(t) t.horaInicio=j.horaInicio; toast('Surtido iniciado','success'); }
+    else toast((j&&j.error)||'No se pudo iniciar','error');
+  }catch(e){ toast('Error de conexión','error'); }
+  renderTraspasosERP();
+}
+
+async function teFinish(folio){
+  try{
+    const res = await fetch(SHEETS_URL,{method:'POST',mode:'cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'traspasoFinish',folio})});
+    const j = await res.json();
+    if(j && j.ok){ const t=traspasosERP.find(x=>x.folio===folio); if(t){ t.horaFin=j.horaFin; t.tiempo=j.tiempo; } toast('Surtido finalizado'+(j.tiempo!==''?' · '+j.tiempo+' min':''),'success'); }
+    else toast((j&&j.error)||'No se pudo finalizar','error');
+  }catch(e){ toast('Error de conexión','error'); }
+  renderTraspasosERP();
 }
 
 // Al cargar: si hay sesión activa entra directo; si no, muestra login.
